@@ -1,0 +1,397 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Good Replies API",
+    "description": "API for Good Replies service",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5006"
+    }
+  ],
+  "paths": {
+    "/api/process-tweets": {
+      "post": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Process Tweets",
+        "description": "Process a list of tweet URLs, extracting tweet IDs and validating the URLs.",
+        "operationId": "process_tweets_api_process_tweets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProcessTweetsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessTweetsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/whitelisted-users": {
+      "get": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Get Whitelisted Users",
+        "description": "Get the list of users that are currently whitelisted (verified humans).",
+        "operationId": "get_whitelisted_users_api_whitelisted_users_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhitelistedUsersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/verify": {
+      "post": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Verify Auth",
+        "description": "Verify user authentication with email and password, and generate a new API key.",
+        "operationId": "verify_auth_api_auth_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AuthRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "AuthRequest"
+      },
+      "AuthResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "title": "AuthResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/PydanticValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ProcessTweetsRequest": {
+        "properties": {
+          "tweet_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tweet Urls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tweet_urls"
+        ],
+        "title": "ProcessTweetsRequest"
+      },
+      "ProcessTweetsResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/TweetProcessingResult"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "successfully_processed": {
+            "type": "integer",
+            "title": "Successfully Processed"
+          },
+          "failed_to_process": {
+            "type": "integer",
+            "title": "Failed To Process"
+          }
+        },
+        "type": "object",
+        "required": [
+          "results",
+          "successfully_processed",
+          "failed_to_process"
+        ],
+        "title": "ProcessTweetsResponse"
+      },
+      "TweetProcessingResult": {
+        "properties": {
+          "tweet_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tweet Id"
+          },
+          "original_url": {
+            "type": "string",
+            "title": "Original Url"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tweet_id",
+          "original_url",
+          "success"
+        ],
+        "title": "TweetProcessingResult"
+      },
+      "WhitelistedUser": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "platform": {
+            "type": "string",
+            "title": "Platform"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "follower_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follower Count"
+          },
+          "verification_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verification Score"
+          },
+          "linked_at": {
+            "type": "string",
+            "title": "Linked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "platform",
+          "display_name",
+          "follower_count",
+          "verification_score",
+          "linked_at"
+        ],
+        "title": "WhitelistedUser"
+      },
+      "WhitelistedUsersResponse": {
+        "properties": {
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/WhitelistedUser"
+            },
+            "type": "array",
+            "title": "Users"
+          },
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "users",
+          "total_count"
+        ],
+        "title": "WhitelistedUsersResponse"
+      },
+      "PydanticValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

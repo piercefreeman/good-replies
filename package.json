@@ -1,0 +1,25 @@
+{
+  "name": "good-replies-extension",
+  "version": "1.0.0",
+  "description": "A Chrome extension for good replies",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node build.js --watch",
+    "clean": "rm -rf dist",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.8",
+    "@types/chrome": "^0.0.246",
+    "@types/jest": "^29.0.0",
+    "autoprefixer": "^10.4.21",
+    "esbuild": "^0.19.0",
+    "jest": "^29.0.0",
+    "jest-environment-jsdom": "^29.0.0",
+    "jsdom": "^22.0.0",
+    "tailwindcss": "^4.1.8",
+    "ts-jest": "^29.0.0",
+    "typescript": "^5.0.0"
+  }
+}
