@@ -4,6 +4,19 @@ console.log('BadBot content script loaded');
 
 const parser = new CommentParser();
 
+// Add debugging state tracking
+const debugState = {
+  filteringInProgress: false,
+  buttonAdditionInProgress: false,
+  lastFilterTime: 0,
+  lastButtonAddTime: 0,
+  filterCallCount: 0,
+  buttonAddCallCount: 0,
+  ourMutationInProgress: false, // Track when we're making DOM changes
+  hiddenElementsCount: 0, // Track hidden elements for consistency
+  lastFilteredCommentCount: 0 // Track how many comments we last filtered (global)
+};
+
 // Test connection to background script
 async function testBackgroundConnection(): Promise<boolean> {
   return new Promise((resolve) => {
@@ -61,7 +74,9 @@ function showNotification(message: string, duration: number = 3000) {
   setTimeout(() => {
     notification.style.opacity = '0';
     setTimeout(() => {
-      document.body.removeChild(notification);
+      if (document.body.contains(notification)) {
+        document.body.removeChild(notification);
+      }
     }, 300);
   }, duration);
 }
@@ -70,13 +85,26 @@ function isStatusPage(): boolean {
   return window.location.pathname.includes('/status/');
 }
 
+// Cache to prevent duplicate whitelist checks
+const whitelistCache = new Map<string, { result: boolean; timestamp: number }>();
+const CACHE_DURATION = 30000; // 30 seconds
+
 async function checkUserWhitelisted(username: string, retryCount: number = 0): Promise<boolean> {
   const maxRetries = 3;
   const retryDelay = 1000; // 1 second
   
+  console.log(`🔍 checkUserWhitelisted called for ${username} (attempt ${retryCount + 1})`);
+  
+  // Check cache first
+  const cached = whitelistCache.get(username);
+  if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+    console.log(`📋 Using cached result for ${username}: ${cached.result}`);
+    return cached.result;
+  }
+  
   return new Promise((resolve) => {
     try {
-      console.log(`Checking if user ${username} is whitelisted (attempt ${retryCount + 1})`);
+      console.log(`🌐 Checking if user ${username} is whitelisted (attempt ${retryCount + 1})`);
       chrome.runtime.sendMessage(
         { action: 'isUserWhitelisted', username },
         (response) => {
@@ -85,19 +113,25 @@ async function checkUserWhitelisted(username: string, retryCount: number = 0): P
             
             // If we haven't exceeded max retries, try again after a delay
             if (retryCount < maxRetries) {
-              console.log(`Retrying in ${retryDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+              console.log(`🔄 Retrying in ${retryDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
               setTimeout(() => {
                 checkUserWhitelisted(username, retryCount + 1).then(resolve);
               }, retryDelay);
               return;
             }
             
-            console.error(`Failed to check whitelist for ${username} after ${maxRetries} attempts`);
+            console.error(`❌ Failed to check whitelist for ${username} after ${maxRetries} attempts`);
             resolve(false);
             return;
           }
-          console.log(`User ${username} whitelist result:`, response?.isWhitelisted || false);
-          resolve(response?.isWhitelisted || false);
+          
+          const result = response?.isWhitelisted || false;
+          console.log(`✅ User ${username} whitelist result: ${result}`);
+          
+          // Cache the result
+          whitelistCache.set(username, { result, timestamp: Date.now() });
+          
+          resolve(result);
         }
       );
     } catch (error) {
@@ -105,7 +139,7 @@ async function checkUserWhitelisted(username: string, retryCount: number = 0): P
       
       // If we haven't exceeded max retries, try again after a delay
       if (retryCount < maxRetries) {
-        console.log(`Retrying in ${retryDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+        console.log(`🔄 Retrying in ${retryDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
         setTimeout(() => {
           checkUserWhitelisted(username, retryCount + 1).then(resolve);
         }, retryDelay);
@@ -117,89 +151,7 @@ async function checkUserWhitelisted(username: string, retryCount: number = 0): P
   });
 }
 
-function createCollapsibleSection(hiddenReplies: HTMLElement[]): HTMLElement {
-  const container = document.createElement('div');
-  container.style.cssText = `
-    margin: 16px 0;
-    border: 1px solid rgb(51, 54, 57);
-    border-radius: 16px;
-    background: rgb(22, 24, 28);
-  `;
 
-  const header = document.createElement('div');
-  header.style.cssText = `
-    padding: 12px 16px;
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-bottom: 1px solid rgb(51, 54, 57);
-    background: rgb(32, 35, 39);
-    border-radius: 16px 16px 0 0;
-  `;
-
-  const headerText = document.createElement('span');
-  headerText.style.cssText = `
-    color: rgb(113, 118, 123);
-    font-size: 15px;
-    font-weight: 400;
-  `;
-  headerText.textContent = `${hiddenReplies.length} additional replies (filtered)`;
-
-  const arrow = document.createElement('span');
-  arrow.style.cssText = `
-    color: rgb(113, 118, 123);
-    font-size: 14px;
-    transition: transform 0.2s ease;
-  `;
-  arrow.textContent = '▼';
-
-  header.appendChild(headerText);
-  header.appendChild(arrow);
-
-  const content = document.createElement('div');
-  content.style.cssText = `
-    display: none;
-    border-radius: 0 0 16px 16px;
-    overflow: hidden;
-  `;
-
-  hiddenReplies.forEach(reply => {
-    // Reset any hidden styling before moving to collapsible section
-    reply.style.display = '';
-    reply.removeAttribute('data-good-replies-hidden');
-    content.appendChild(reply);
-  });
-
-  let isExpanded = false;
-  header.addEventListener('click', () => {
-    isExpanded = !isExpanded;
-    
-    if (isExpanded) {
-      content.style.display = 'block';
-      // Ensure all nested elements are visible
-      const allElements = content.querySelectorAll('*');
-      allElements.forEach(el => {
-        const element = el as HTMLElement;
-        if (element.style.display === 'none') {
-          element.style.display = '';
-        }
-      });
-    } else {
-      content.style.display = 'none';
-    }
-    
-    arrow.style.transform = isExpanded ? 'rotate(180deg)' : 'rotate(0deg)';
-    
-    // Update header text to reflect state
-    headerText.textContent = `${hiddenReplies.length} additional replies (filtered)${isExpanded ? ' - Click to collapse' : ' - Click to expand'}`;
-  });
-
-  container.appendChild(header);
-  container.appendChild(content);
-
-  return container;
-}
 
 let isFilteringEnabled = false;
 
@@ -267,16 +219,46 @@ function createToggleButton(): HTMLElement {
   `;
   button.textContent = 'Hide Non-Whitelisted Replies';
   button.setAttribute('data-good-replies-toggle', 'true');
+  button.id = 'good-replies-filter-button';
   
   button.addEventListener('click', () => {
+    console.log(`🎯 Button clicked! Current filtering state: ${isFilteringEnabled}`);
+    
+    // Mark that we're making DOM changes
+    debugState.ourMutationInProgress = true;
+    
     isFilteringEnabled = !isFilteringEnabled;
     button.textContent = isFilteringEnabled ? 'Show All Replies' : 'Hide Non-Whitelisted Replies';
     button.style.background = isFilteringEnabled ? '#f91880' : '#1d9bf0';
     
+    console.log(`🎯 New filtering state: ${isFilteringEnabled}`);
+    
     if (isFilteringEnabled) {
-      filterReplies();
+      console.log('🔽 Starting reply filtering...');
+      
+      // Initialize comment count tracking when first enabling filtering
+      const currentComments = parser.parseAllComments();
+      debugState.lastFilteredCommentCount = currentComments.length;
+      console.log(`📊 Initializing lastFilteredCommentCount to ${debugState.lastFilteredCommentCount}`);
+      
+      filterReplies().finally(() => {
+        // Clear our mutation flag after filtering is complete
+        setTimeout(() => {
+          debugState.ourMutationInProgress = false;
+        }, 500);
+      });
     } else {
+      console.log('🔼 Showing all replies...');
       showAllReplies();
+      
+      // Reset comment count tracking when disabling filtering
+      debugState.lastFilteredCommentCount = 0;
+      console.log('📊 Reset lastFilteredCommentCount to 0');
+      
+      // Clear our mutation flag after showing replies
+      setTimeout(() => {
+        debugState.ourMutationInProgress = false;
+      }, 500);
     }
   });
   
@@ -298,93 +280,149 @@ function createToggleButton(): HTMLElement {
   cellContainer.appendChild(innerContainer);
   
   console.log('✅ Button cell structure created:', cellContainer);
-  console.log('  Cell container classes:', cellContainer.className);
-  console.log('  Cell container testid:', cellContainer.getAttribute('data-testid'));
-  console.log('  Button text:', button.textContent);
   
   return cellContainer;
 }
 
 function showAllReplies() {
-  const existingCollapsible = document.querySelector('[data-good-replies-collapsible]');
-  if (existingCollapsible) {
-    existingCollapsible.remove();
+  console.log('🔼 showAllReplies() called');
+  console.log(`📊 Current hidden elements count: ${debugState.hiddenElementsCount}`);
+  
+  const hiddenElements = document.querySelectorAll('[data-good-replies-filtered="true"]');
+  console.log(`👁️ Found ${hiddenElements.length} filtered elements to show`);
+  
+  if (hiddenElements.length !== debugState.hiddenElementsCount) {
+    console.warn(`⚠️ Element count mismatch! Expected ${debugState.hiddenElementsCount}, found ${hiddenElements.length}`);
   }
   
-  const hiddenElements = document.querySelectorAll('[data-good-replies-hidden]');
-  hiddenElements.forEach(element => {
+  hiddenElements.forEach((element, index) => {
+    console.log(`👁️ Showing element ${index + 1}/${hiddenElements.length}`);
     (element as HTMLElement).style.display = '';
-    element.removeAttribute('data-good-replies-hidden');
+    element.removeAttribute('data-good-replies-filtered');
+    element.removeAttribute('data-good-replies-filter-reason');
   });
+  
+  // Reset our counter
+  debugState.hiddenElementsCount = 0;
+  
+  console.log('✅ All replies shown');
 }
 
 async function filterReplies() {
-  if (!isStatusPage() || !isFilteringEnabled) return;
-
-  const comments = parser.parseAllComments();
-  if (comments.length === 0) return;
-
-  const whitelistedElements: HTMLElement[] = [];
-  const nonWhitelistedElements: HTMLElement[] = [];
-
-  for (const comment of comments) {
-    if (!comment.author.username) {
-      nonWhitelistedElements.push(comment.element);
-      continue;
-    }
-
-    const isWhitelisted = await checkUserWhitelisted(comment.author.username);
-    if (isWhitelisted) {
-      whitelistedElements.push(comment.element);
-    } else {
-      nonWhitelistedElements.push(comment.element);
-    }
-  }
-
-  if (nonWhitelistedElements.length === 0) return;
-
-  const existingCollapsible = document.querySelector('[data-good-replies-collapsible]');
-  if (existingCollapsible) {
-    existingCollapsible.remove();
-  }
-
-  nonWhitelistedElements.forEach(element => {
-    element.style.display = 'none';
-    element.setAttribute('data-good-replies-hidden', 'true');
-  });
-
-  // Find where to place the collapsible section
-  // If there are whitelisted replies, place it after the last one
-  // Otherwise, place it after the toggle button
-  let insertionPoint: Element | null = null;
+  console.log('🔽 filterReplies() called');
+  console.log(`📊 Debug state: filtering=${debugState.filteringInProgress}, enabled=${isFilteringEnabled}, statusPage=${isStatusPage()}`);
   
-  if (whitelistedElements.length > 0) {
-    const lastWhitelistedElement = whitelistedElements[whitelistedElements.length - 1];
-    const cellDiv = lastWhitelistedElement.closest('[data-testid="cellInnerDiv"]');
-    insertionPoint = cellDiv;
-  } else {
-    // Place after toggle button if no whitelisted replies
-    const toggleButton = document.querySelector('[data-good-replies-toggle]');
-    insertionPoint = toggleButton;
+  if (!isStatusPage() || !isFilteringEnabled) {
+    console.log('⏭️ Skipping filtering: not status page or filtering disabled');
+    return;
   }
+
+  if (debugState.filteringInProgress) {
+    console.log('⏭️ Filtering already in progress, skipping');
+    return;
+  }
+
+  debugState.filteringInProgress = true;
+  debugState.filterCallCount++;
+  debugState.lastFilterTime = Date.now();
   
-  if (insertionPoint && insertionPoint.parentNode) {
-    const collapsibleSection = createCollapsibleSection(nonWhitelistedElements);
-    collapsibleSection.setAttribute('data-good-replies-collapsible', 'true');
+  console.log(`🔢 Filter call count: ${debugState.filterCallCount}`);
+
+  try {
+    console.log('🔍 Parsing comments...');
+    const comments = parser.parseAllComments();
+    console.log(`📝 Found ${comments.length} comments`);
     
-    insertionPoint.parentNode.insertBefore(
-      collapsibleSection, 
-      insertionPoint.nextSibling
-    );
+    if (comments.length === 0) {
+      console.log('⏭️ No comments found, skipping filtering');
+      return;
+    }
+
+    const whitelistedElements: HTMLElement[] = [];
+    const nonWhitelistedElements: HTMLElement[] = [];
+
+    console.log('🔍 Checking whitelist status for all users...');
+    for (const comment of comments) {
+      if (!comment.author.username) {
+        console.log('👤 Found comment without username, adding to non-whitelisted');
+        nonWhitelistedElements.push(comment.element);
+        continue;
+      }
+
+      console.log(`👤 Checking user: ${comment.author.username}`);
+      const isWhitelisted = await checkUserWhitelisted(comment.author.username);
+      if (isWhitelisted) {
+        console.log(`✅ ${comment.author.username} is whitelisted`);
+        whitelistedElements.push(comment.element);
+      } else {
+        console.log(`❌ ${comment.author.username} is not whitelisted`);
+        nonWhitelistedElements.push(comment.element);
+      }
+    }
+
+    console.log(`📊 Results: ${whitelistedElements.length} whitelisted, ${nonWhitelistedElements.length} non-whitelisted`);
+
+    if (nonWhitelistedElements.length === 0) {
+      console.log('✅ No non-whitelisted elements to hide');
+      return;
+    }
+
+    console.log(`🙈 Hiding ${nonWhitelistedElements.length} non-whitelisted elements in place`);
+    nonWhitelistedElements.forEach((element, index) => {
+      console.log(`🙈 Hiding element ${index + 1}/${nonWhitelistedElements.length}`);
+      
+      // Hide the element with CSS and add data attribute for identification
+      element.style.display = 'none';
+      element.setAttribute('data-good-replies-filtered', 'true');
+      element.setAttribute('data-good-replies-filter-reason', 'not-whitelisted');
+    });
+
+    // Update our counter to track hidden elements
+    debugState.hiddenElementsCount = nonWhitelistedElements.length;
+    console.log(`📊 Updated hidden elements count: ${debugState.hiddenElementsCount}`);
+
+    console.log('✅ Reply filtering completed - elements hidden in place');
+  } catch (error) {
+    console.error('❌ Error during filtering:', error);
+  } finally {
+    debugState.filteringInProgress = false;
   }
 }
 
 function observePageChanges() {
+  console.log('👀 Setting up page change observer');
+  
   let buttonAdditionTimeout: NodeJS.Timeout | null = null;
+  let filterTimeout: NodeJS.Timeout | null = null;
+  let filterCooldownUntil = 0; // Timestamp when we can filter again
+  const FILTER_COOLDOWN_MS = 1000; // Don't filter more than once every 5 seconds
+  const MIN_COMMENT_INCREASE = 5; // Only filter if comment count increased by at least 5
   
   const observer = new MutationObserver((mutations) => {
+    // Skip if we're currently making our own mutations
+    if (debugState.ourMutationInProgress) {
+      console.log('⏭️ Skipping mutation handling - our operation in progress');
+      return;
+    }
+    
+    // Check cooldown period
+    const now = Date.now();
+    if (now < filterCooldownUntil) {
+      console.log('⏭️ Skipping mutation handling - filter cooldown active');
+      return;
+    }
+    
     let shouldFilter = false;
     let shouldAddButton = false;
+    let newContentDetected = false;
+    
+    // Count mutations for debugging
+    const mutationCount = mutations.length;
+    const addedNodesCount = mutations.reduce((count, mut) => count + mut.addedNodes.length, 0);
+    
+    if (mutationCount > 50 || addedNodesCount > 100) {
+      console.log(`⚠️ High mutation count detected: ${mutationCount} mutations, ${addedNodesCount} added nodes`);
+    }
     
     mutations.forEach((mutation) => {
       if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
@@ -392,10 +430,22 @@ function observePageChanges() {
           if (node.nodeType === Node.ELEMENT_NODE) {
             const element = node as Element;
             
-            // Check if new tweets were added
+            // Skip if this is one of our own elements
+            if (element.hasAttribute && (
+                element.hasAttribute('data-good-replies-button-cell') ||
+                element.hasAttribute('data-good-replies-filtered') ||
+                element.querySelector('[data-good-replies-button-cell]') ||
+                element.querySelector('[data-good-replies-filtered]')
+              )) {
+              console.log('⏭️ Skipping mutation for our own element');
+              continue;
+            }
+            
+            // Check if new tweets were added (but not our own)
             if (element.querySelector('[data-testid="tweet"]') || 
                 element.closest('[data-testid="tweet"]')) {
-              shouldFilter = true;
+              console.log('🆕 New tweet detected, checking if it needs filtering');
+              newContentDetected = true;
             }
             
             // Trigger button addition if we see the reply section or timeline changes
@@ -404,6 +454,7 @@ function observePageChanges() {
                 element.querySelector('[data-testid^="tweetTextarea"]') ||
                 (element.getAttribute('data-testid') === 'cellInnerDiv' && 
                  !element.getAttribute('data-good-replies-button-cell'))) {
+              console.log('🆕 Reply section or timeline change detected');
               shouldAddButton = true;
             }
           }
@@ -411,7 +462,7 @@ function observePageChanges() {
       }
     });
     
-    if (shouldAddButton && !document.querySelector('[data-good-replies-toggle]')) {
+    if (shouldAddButton && !document.querySelector('[data-good-replies-toggle]') && !document.getElementById('good-replies-filter-button')) {
       console.log('🔄 MutationObserver detected need to add button');
       
       // Debounce button addition to prevent spam
@@ -420,17 +471,52 @@ function observePageChanges() {
       }
       
       buttonAdditionTimeout = setTimeout(() => {
-        if (isStatusPage() && !document.querySelector('[data-good-replies-toggle]')) {
+        if (isStatusPage() && !document.querySelector('[data-good-replies-toggle]') && !document.getElementById('good-replies-filter-button')) {
           console.log('📍 Adding button via MutationObserver');
           addToggleButton();
-        } else {
-          console.log('⏭️ Skipping button addition: not status page or button already exists');
         }
       }, 500);
     }
     
-    if (shouldFilter && isFilteringEnabled) {
-      setTimeout(filterReplies, 500);
+    // Only consider filtering if we detected new content and filtering is enabled
+    if (newContentDetected && isFilteringEnabled) {
+      console.log('🔄 New content detected, checking if filtering needed...');
+      
+      // Check current comment count to see if it's worth filtering
+      const currentComments = parser.parseAllComments();
+      const currentCount = currentComments.length;
+      
+      console.log(`📊 Comment count: ${currentCount} (previously ${debugState.lastFilteredCommentCount})`);
+      
+      // Only filter if we have significantly more comments than last time
+      if (currentCount > debugState.lastFilteredCommentCount + MIN_COMMENT_INCREASE) {
+        console.log(`📈 Significant increase detected (${currentCount - debugState.lastFilteredCommentCount} new comments), scheduling filter`);
+        shouldFilter = true;
+      } else {
+        console.log(`📊 Not enough new comments (${currentCount - debugState.lastFilteredCommentCount}), skipping filter`);
+      }
+    }
+    
+    if (shouldFilter) {
+      console.log('🔄 MutationObserver detected new content, scheduling filter');
+      
+      // Set cooldown period
+      filterCooldownUntil = now + FILTER_COOLDOWN_MS;
+      
+      // Debounce filtering to prevent excessive calls
+      if (filterTimeout) {
+        clearTimeout(filterTimeout);
+      }
+      
+      filterTimeout = setTimeout(() => {
+        console.log('🔄 MutationObserver triggered filtering');
+        filterReplies().then(() => {
+          // Update our comment count after successful filtering
+          const filteredComments = parser.parseAllComments();
+          debugState.lastFilteredCommentCount = filteredComments.length;
+          console.log(`📊 Updated lastFilteredCommentCount to ${debugState.lastFilteredCommentCount}`);
+        });
+      }, 2000); // Increased debounce time
     }
   });
 
@@ -438,88 +524,157 @@ function observePageChanges() {
     childList: true,
     subtree: true
   });
+  
+  console.log('✅ Page change observer setup complete');
 }
 
 function addToggleButton() {
-  console.log('🚀 addToggleButton() called');
+  debugState.buttonAddCallCount++;
+  debugState.lastButtonAddTime = Date.now();
   
-  // More thorough check for existing buttons
-  const existingButton = document.querySelector('[data-good-replies-toggle]');
-  const existingButtonCell = document.querySelector('[data-good-replies-button-cell]');
+  console.log(`🚀 addToggleButton() called (attempt ${debugState.buttonAddCallCount})`);
+  console.log(`📊 Debug state: buttonInProgress=${debugState.buttonAdditionInProgress}`);
   
-  if (existingButton || existingButtonCell) {
-    console.log('🗑️ Removing existing button(s)');
-    existingButton?.closest('[data-testid="cellInnerDiv"]')?.remove();
-    existingButtonCell?.remove();
-    
-    // Remove any duplicate buttons
-    const allButtons = document.querySelectorAll('[data-good-replies-toggle]');
-    allButtons.forEach(btn => btn.closest('[data-testid="cellInnerDiv"]')?.remove());
+  if (debugState.buttonAdditionInProgress) {
+    console.log('⏭️ Button addition already in progress, skipping');
+    return;
   }
   
-  const tryAddButton = () => {
-    console.log('🔍 Attempting to add button...');
-    
-    // Look for the reply compose section - this is much more reliable positioning
-    const replySection = document.querySelector('[class*="r-1h8ys4a"][class*="r-1mmae3n"]');
-    if (!replySection) {
-      console.log('❌ Reply section not found');
-      return false;
-    }
-    console.log('✅ Reply section found:', replySection);
-    
-    // Double-check this is the reply section by looking for "Replying to" text or tweet textarea
-    const hasReplyingTo = replySection.textContent?.includes('Replying to');
-    const hasTweetTextarea = replySection.querySelector('[data-testid^="tweetTextarea"]');
-    
-    if (!hasReplyingTo && !hasTweetTextarea) {
-      console.log('❌ Found section but it doesn\'t look like reply compose area');
-      return false;
-    }
-    console.log('✅ Confirmed this is the reply compose section');
-    
-    // Create and insert the button right before the reply section
-    console.log('🔨 Creating button cell...');
-    const buttonCell = createToggleButton();
-    
-    console.log('📍 Inserting button above reply section...');
-    console.log('  Reply section:', replySection);
-    console.log('  Parent node:', replySection.parentNode);
-    
-    // Insert the button right before the reply compose section
-    if (replySection.parentNode) {
-      replySection.parentNode.insertBefore(buttonCell, replySection);
-      
-      console.log('✅ Button successfully inserted above reply section');
-      console.log('  Button element:', buttonCell);
-      console.log('  Button now in DOM:', document.contains(buttonCell));
-      
-      // Verify the button is actually visible
-      const insertedButton = document.querySelector('[data-good-replies-toggle]');
-      if (insertedButton) {
-        const rect = insertedButton.getBoundingClientRect();
-        console.log('  Button bounding rect:', rect);
-        console.log('  Button visible:', rect.width > 0 && rect.height > 0);
-      }
-      
-      return true;
-    }
-    
-    console.log('❌ No parent node found for reply section');
-    return false;
-  };
+  debugState.buttonAdditionInProgress = true;
   
-  // Try with progressive delays to handle dynamic loading
-  if (!tryAddButton()) {
-    setTimeout(() => {
-      if (!tryAddButton()) {
-        setTimeout(() => {
-          if (!tryAddButton()) {
-            console.log('Failed to add button after multiple attempts');
-          }
-        }, 1000);
+  try {
+    // Mark that we're making DOM changes
+    debugState.ourMutationInProgress = true;
+    
+    // More thorough check for existing buttons
+    const existingButton = document.querySelector('[data-good-replies-toggle]');
+    const existingButtonById = document.getElementById('good-replies-filter-button');
+    const existingButtonCell = document.querySelector('[data-good-replies-button-cell]');
+    
+    if (existingButton || existingButtonById || existingButtonCell) {
+      console.log('🗑️ Found existing button(s), hiding them instead of removing');
+      
+      // Hide instead of remove to prevent DOM issues
+      if (existingButton) {
+        const buttonContainer = existingButton.closest('[data-testid="cellInnerDiv"]');
+        if (buttonContainer) {
+          (buttonContainer as HTMLElement).style.display = 'none';
+          buttonContainer.setAttribute('data-good-replies-hidden-button', 'true');
+        }
       }
-    }, 500);
+      
+      if (existingButtonById) {
+        const buttonContainer = existingButtonById.closest('[data-testid="cellInnerDiv"]');
+        if (buttonContainer) {
+          (buttonContainer as HTMLElement).style.display = 'none';
+          buttonContainer.setAttribute('data-good-replies-hidden-button', 'true');
+        }
+      }
+      
+      if (existingButtonCell && 
+          existingButtonCell !== existingButton?.closest('[data-testid="cellInnerDiv"]') &&
+          existingButtonCell !== existingButtonById?.closest('[data-testid="cellInnerDiv"]')) {
+        (existingButtonCell as HTMLElement).style.display = 'none';
+        existingButtonCell.setAttribute('data-good-replies-hidden-button', 'true');
+      }
+    }
+    
+    const tryAddButton = () => {
+      console.log('🔍 Attempting to add button...');
+      
+      // Look for multiple possible reply section selectors
+      const replySelectors = [
+        '[class*="r-1h8ys4a"][class*="r-1mmae3n"]',
+        '[data-testid^="tweetTextarea"]',
+        '[aria-label*="Tweet text"]',
+        '[placeholder*="Tweet your reply"]'
+      ];
+      
+      let replySection: Element | null = null;
+      
+      for (const selector of replySelectors) {
+        replySection = document.querySelector(selector);
+        if (replySection) {
+          console.log(`✅ Found reply section with selector: ${selector}`);
+          break;
+        }
+      }
+      
+      if (!replySection) {
+        console.log('❌ Reply section not found with any selector');
+        console.log('🔍 Available selectors checked:', replySelectors);
+        
+        // Log some DOM info for debugging
+        const timelineCells = document.querySelectorAll('[data-testid="cellInnerDiv"]');
+        console.log(`📊 Found ${timelineCells.length} timeline cells`);
+        
+        return false;
+      }
+      
+      console.log('✅ Reply section found:', replySection);
+      
+      // Double-check this is the reply section
+      const hasReplyingTo = replySection.textContent?.includes('Replying to');
+      const hasTweetTextarea = replySection.querySelector('[data-testid^="tweetTextarea"]');
+      const hasPlaceholder = replySection.querySelector('[placeholder*="Tweet your reply"]') || 
+                           replySection.querySelector('[placeholder*="reply"]');
+      
+      if (!hasReplyingTo && !hasTweetTextarea && !hasPlaceholder) {
+        console.log('❌ Found section but it doesn\'t look like reply compose area');
+        console.log('  - Has "Replying to":', hasReplyingTo);
+        console.log('  - Has tweet textarea:', !!hasTweetTextarea);
+        console.log('  - Has reply placeholder:', !!hasPlaceholder);
+        return false;
+      }
+      
+      console.log('✅ Confirmed this is the reply compose section');
+      
+      // Create and insert the button right before the reply section
+      console.log('🔨 Creating button cell...');
+      const buttonCell = createToggleButton();
+      
+      console.log('📍 Inserting button above reply section...');
+      
+      // Insert the button right before the reply compose section
+      if (replySection.parentNode) {
+        replySection.parentNode.insertBefore(buttonCell, replySection);
+        
+        console.log('✅ Button successfully inserted above reply section');
+        
+        // Verify the button is actually visible
+        const insertedButton = document.querySelector('[data-good-replies-toggle]');
+        if (insertedButton) {
+          const rect = insertedButton.getBoundingClientRect();
+          console.log(`📏 Button bounding rect: ${rect.width}x${rect.height} at (${rect.x}, ${rect.y})`);
+          console.log(`👁️ Button visible: ${rect.width > 0 && rect.height > 0}`);
+        }
+        
+        return true;
+      }
+      
+      console.log('❌ No parent node found for reply section');
+      return false;
+    };
+    
+    // Try with progressive delays to handle dynamic loading
+    if (!tryAddButton()) {
+      setTimeout(() => {
+        if (!tryAddButton()) {
+          setTimeout(() => {
+            if (!tryAddButton()) {
+              console.log('❌ Failed to add button after multiple attempts');
+            }
+          }, 1000);
+        }
+      }, 500);
+    }
+    
+    // Clear our mutation flag after button addition
+    setTimeout(() => {
+      debugState.ourMutationInProgress = false;
+    }, 1000);
+  } finally {
+    debugState.buttonAdditionInProgress = false;
   }
 }
 
@@ -527,31 +682,42 @@ function init() {
   console.log('🎯 Initializing BadBot extension');
   console.log('  Current URL:', window.location.href);
   console.log('  Is status page:', isStatusPage());
+  console.log('  Document ready state:', document.readyState);
   
   if (isStatusPage()) {
     console.log('📍 Status page detected, adding toggle button');
     addToggleButton();
     observePageChanges();
     
-    // Periodic check to ensure button is properly positioned
+    // More conservative periodic check with better safeguards
     const intervalId = setInterval(() => {
       if (!isStatusPage()) {
+        console.log('🛑 Not on status page anymore, clearing interval');
         clearInterval(intervalId);
         return;
       }
       
-      const button = document.querySelector('[data-good-replies-toggle]');
+      // Check if too much time has passed since last successful operations
+      const now = Date.now();
+      const timeSinceLastFilter = now - debugState.lastFilterTime;
+      const timeSinceLastButton = now - debugState.lastButtonAddTime;
+      
+      // Only run periodic check if it's been a while since last activity
+      if (timeSinceLastButton < 10000) { // Skip if button was added recently
+        return;
+      }
+      
+      const button = document.querySelector('[data-good-replies-toggle]') || document.getElementById('good-replies-filter-button');
       const replySection = document.querySelector('[class*="r-1h8ys4a"][class*="r-1mmae3n"]');
       
       // Check if button exists and is positioned correctly
       if (!button || !replySection) {
         if (!button) {
           console.log('🔄 Periodic check: Button missing, re-adding...');
+          addToggleButton();
         } else {
           console.log('🔄 Periodic check: Reply section missing, waiting...');
-          return; // Don't re-add if reply section is gone, wait for it to appear
         }
-        addToggleButton();
       } else {
         // Verify the button is properly positioned before the reply section
         const buttonContainer = button.closest('[data-good-replies-button-cell]');
@@ -565,7 +731,7 @@ function init() {
           }
         }
       }
-    }, 5000);
+    }, 10000); // Increased to 10 seconds for less aggressive checking
     
     console.log('✅ BadBot initialization complete');
   } else {
@@ -585,6 +751,14 @@ new MutationObserver(() => {
   if (currentUrl !== lastUrl) {
     console.log('🔄 URL changed from', lastUrl, 'to', currentUrl);
     lastUrl = currentUrl;
+    
+    // Clear debug state on URL change
+    debugState.filteringInProgress = false;
+    debugState.buttonAdditionInProgress = false;
+    debugState.ourMutationInProgress = false;
+    debugState.hiddenElementsCount = 0;
+    debugState.lastFilteredCommentCount = 0;
+    
     setTimeout(() => {
       console.log('🔄 Re-initializing after URL change');
       init();
