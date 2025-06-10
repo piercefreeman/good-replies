@@ -1,8 +1,8 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Good Replies API
- * API for Good Replies service
+ * BadBot API
+ * API for BadBot service
  *
  * The version of the OpenAPI document: 1.0.0
  * 

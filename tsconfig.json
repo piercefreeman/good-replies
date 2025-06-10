@@ -8,9 +8,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
-    "rootDir": "./src",
     "types": ["chrome", "jest"]
   },
-  "include": ["src/**/*", "tests/**/*"],
+  "include": ["src/**/*", "api/**/*", "tests/**/*"],
   "exclude": ["node_modules", "dist"]
 }

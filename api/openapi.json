@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Good Replies API",
-    "description": "API for Good Replies service",
+    "title": "BadBot API",
+    "description": "API for BadBot service",
     "version": "1.0.0"
   },
   "servers": [

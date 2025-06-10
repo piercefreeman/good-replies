@@ -5,6 +5,7 @@
   "scripts": {
     "build": "node build.js",
     "dev": "node build.js --watch",
+    "dev-build": "node build.js --watch",
     "clean": "rm -rf dist",
     "test": "jest",
     "test:watch": "jest --watch"

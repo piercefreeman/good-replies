@@ -12,7 +12,7 @@ class PopupManager {
 
   constructor() {
     const config = new Configuration({
-      //basePath: 'https://api.goodreplies.com'
+      //basePath: 'https://api.badbot.me'
       basePath: 'http://localhost:5006'
     });
     this.api = new PublicApiApi(config);

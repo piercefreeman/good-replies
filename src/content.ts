@@ -1,8 +1,41 @@
 import { CommentParser } from './parser';
 
-console.log('Good Replies content script loaded');
+console.log('BadBot content script loaded');
 
 const parser = new CommentParser();
+
+// Test connection to background script
+async function testBackgroundConnection(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      console.log('Testing connection to background script...');
+      chrome.runtime.sendMessage(
+        { action: 'ping' },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('Background connection test failed:', chrome.runtime.lastError);
+            resolve(false);
+            return;
+          }
+          console.log('Background connection test successful:', response);
+          resolve(true);
+        }
+      );
+    } catch (error) {
+      console.error('Failed to test background connection:', error);
+      resolve(false);
+    }
+  });
+}
+
+// Test the connection when content script loads
+testBackgroundConnection().then(connected => {
+  if (connected) {
+    console.log('✅ Background script connection verified');
+  } else {
+    console.error('❌ Background script connection failed');
+  }
+});
 
 function showNotification(message: string, duration: number = 3000) {
   const notification = document.createElement('div');
@@ -37,14 +70,50 @@ function isStatusPage(): boolean {
   return window.location.pathname.includes('/status/');
 }
 
-async function checkUserWhitelisted(username: string): Promise<boolean> {
+async function checkUserWhitelisted(username: string, retryCount: number = 0): Promise<boolean> {
+  const maxRetries = 3;
+  const retryDelay = 1000; // 1 second
+  
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(
-      { action: 'isUserWhitelisted', username },
-      (response) => {
-        resolve(response?.isWhitelisted || false);
+    try {
+      console.log(`Checking if user ${username} is whitelisted (attempt ${retryCount + 1})`);
+      chrome.runtime.sendMessage(
+        { action: 'isUserWhitelisted', username },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('Chrome runtime error:', chrome.runtime.lastError);
+            
+            // If we haven't exceeded max retries, try again after a delay
+            if (retryCount < maxRetries) {
+              console.log(`Retrying in ${retryDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+              setTimeout(() => {
+                checkUserWhitelisted(username, retryCount + 1).then(resolve);
+              }, retryDelay);
+              return;
+            }
+            
+            console.error(`Failed to check whitelist for ${username} after ${maxRetries} attempts`);
+            resolve(false);
+            return;
+          }
+          console.log(`User ${username} whitelist result:`, response?.isWhitelisted || false);
+          resolve(response?.isWhitelisted || false);
+        }
+      );
+    } catch (error) {
+      console.error('Failed to send message to background script:', error);
+      
+      // If we haven't exceeded max retries, try again after a delay
+      if (retryCount < maxRetries) {
+        console.log(`Retrying in ${retryDelay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+        setTimeout(() => {
+          checkUserWhitelisted(username, retryCount + 1).then(resolve);
+        }, retryDelay);
+        return;
       }
-    );
+      
+      resolve(false);
+    }
   });
 }
 
@@ -455,7 +524,7 @@ function addToggleButton() {
 }
 
 function init() {
-  console.log('🎯 Initializing Good Replies extension');
+  console.log('🎯 Initializing BadBot extension');
   console.log('  Current URL:', window.location.href);
   console.log('  Is status page:', isStatusPage());
   
@@ -498,7 +567,7 @@ function init() {
       }
     }, 5000);
     
-    console.log('✅ Good Replies initialization complete');
+    console.log('✅ BadBot initialization complete');
   } else {
     console.log('⏭️ Not a status page, skipping initialization');
   }
@@ -525,7 +594,7 @@ new MutationObserver(() => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'showMessage') {
-    showNotification('Hello from Good Replies extension!');
+    showNotification('Hello from BadBot extension!');
     sendResponse({ success: true });
   }
   
